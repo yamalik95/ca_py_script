@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils.html import format_html
 
 class PseudocodeObject(models.Model):
     name = models.CharField(max_length=42, null=True, blank=True)
@@ -12,10 +13,13 @@ class PseudocodeObject(models.Model):
     data_max = models.CharField(max_length=42, null=True, blank=True)
     version = models.DecimalField(max_digits=3, decimal_places=1, null=True, blank=True)
     bureau = models.CharField(max_length=42, null=True, blank=True)
-    object_type = models.CharField(max_length=42)
+    object_type = models.CharField(max_length=42, verbose_name='Object Type')
     sub_components = models.TextField(null=True, blank=True)
+    subject_components = models.ManyToManyField('self', symmetrical=False, through='PseudocodeComponentRelation')
     calculation = models.TextField(null=True, blank=True)
     first_interrogation = models.OneToOneField('LUTInterrogation', on_delete=models.SET_NULL, null=True, blank=True)
+    max_upward_explode = models.IntegerField(null=True, blank=True)
+    max_downward_explode = models.IntegerField(null=True, blank=True)
 
     class Meta:
         verbose_name = 'Script Object'
@@ -27,16 +31,16 @@ class PseudocodeObject(models.Model):
 
 class PseudocodeComponentRelation(models.Model):
     master = models.ForeignKey(PseudocodeObject, on_delete=models.CASCADE, related_name='master')
-    subject = models.ForeignKey(PseudocodeObject, on_delete=models.CASCADE, related_name='subject')
+    subject = models.ForeignKey(PseudocodeObject, on_delete=models.CASCADE, related_name='subject', verbose_name='Subject Component')
     subject_return_type = models.CharField(max_length=42, null=True, blank=True)
     subject_note = models.CharField(max_length=424, null=True, blank=True)
     
     class Meta:
-        verbose_name = 'Object Relation'
-        verbose_name_plural = 'Pseudocode Object Relations'
+        verbose_name = 'Relation'
+        verbose_name_plural = 'Sub-Component Relations'
 
     def __str__(self):
-        return f' {self.subject} as SUBJECT to {self.master}'
+        return f'First Degree Master-Subject'
 
 
 class LUTInterrogation(models.Model):
@@ -46,6 +50,8 @@ class LUTInterrogation(models.Model):
     interrogation_target = models.CharField(max_length=42, null=True, blank=True)
     interrogation_return = models.CharField(max_length=42, null=True, blank=True)
     next_interrogation = models.OneToOneField(to='self', on_delete=models.SET_NULL, null=True, blank=True)
+    target_enumeration = models.TextField(null=True, blank=True)
+    return_enumeration = models.TextField(null=True, blank=True)
     index = models.IntegerField(null=True, blank=True)
 
     class Meta:
@@ -53,17 +59,68 @@ class LUTInterrogation(models.Model):
         verbose_name_plural = 'Look-Up Table Interrogations'
 
     def __str__(self):
-        return f'{self.master.name} Interrogation {self.index+1}'
+        return '' 
+        #format_html("<a href='{url}'>{name}</a>", url=f'/admin/ORM/lutinterrogation/{self.id}/change/', name=f'{self.master.name} Interrogation No. {self.index+1}')
+
+
+def change_types():
+    objs = PseudocodeObject.objects.filter(object_type='component attribute').update(object_type='component')
+
+def fix_interrogations():
+    ints = LUTInterrogation.objects.all()
+    for i in ints:
+        temp = i.interrogation_target
+        i.interrogation_target = i.interrogation_return
+        i.interrogation_return = temp
+        i.save()
 
 
 
 
-def update_lut_defaults():
-    all_luts = PseudocodeObject.objects.filter(object_type='look-up table')
-    for lut in all_luts:
-        lut.data_default = lut.calculation
-        lut.calculation = None
-        lut.save()
+def bestow_max_downward_explode():
+    objs = PseudocodeObject.objects.all()
+
+    for obj_i, obj in enumerate(objs):
+        past_masters = [[rel.master for rel in obj.subject.all()]]        
+        deg_of_sep = 0
+        while True:
+            new_masters = [rel.master for past_master in past_masters[deg_of_sep] for rel in past_master.subject.all()]
+            new_masters = list(set(new_masters))
+            deg_of_sep += 1
+            print(deg_of_sep)
+            if not len(new_masters) or new_masters in past_masters:
+                if not len(past_masters[0]):
+                    deg_of_sep = 0 
+                obj.max_downward_explode = deg_of_sep
+                obj.save()
+                break
+            else:
+                past_masters.append(new_masters)
+        print(f'Done with {obj_i}\n')
+
+
+
+    # while not found_recursive_subcomponent:
+    #     new_slaves = [new_slave for slave in slaves[deg_of_sep-1] for new_slave in slave.subject_components.all()]
+    #     for slave_group in slaves[:deg_of_sep]:
+    #         for slave in new_slaves:
+    #             if slave in slave_group and slave.object_type != 'XML Tag':
+    #                 import pdb;pdb.set_trace()
+    #     if not len(new_slaves):
+    #         break
+    #     else:
+    #         slaves.append(new_slaves)
+    #         deg_of_sep += 1
+
+
+
+
+# def update_lut_defaults():
+#     all_luts = PseudocodeObject.objects.filter(object_type='look-up table')
+#     for lut in all_luts:
+#         lut.data_default = lut.calculation
+#         lut.calculation = None
+#         lut.save()
 
 
 # def set_interrogation_index():
